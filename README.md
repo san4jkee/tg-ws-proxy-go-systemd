@@ -2,13 +2,12 @@
 
 Это адаптированная версия менеджера [tg-ws-proxy-go](https://github.com/d0mhate/-tg-ws-proxy-Manager-go) для систем на базе Armbian (Debian/Ubuntu), таких как ваш **Orange Pi Zero 2W**.
 
-Вместо OpenWrt-скриптов используется **systemd** для автозапуска, а управление осуществляется через простые CLI-команды.
+Вместо OpenWrt-скриптов используется **systemd** для автозапуска, а управление осуществляется через простые команды.
 
 ## Особенности
 
 *   **Один бинарный файл**: Не требует Python или других зависимостей.
 *   **Лёгкость**: Исполняемый файл весит около 5-7 МБ.
-*   **Управление**: Простые команды `tgm start`, `stop`, `status`, `enable`, `disable`.
 *   **Автозапуск**: Встроенная поддержка systemd.
 *   **Поддержка архитектур**: Автоматически определяет arm64, armv7, amd64 и другие.
 
@@ -28,23 +27,32 @@ sudo ./tg-ws-proxy-armbian.sh enable
 1. `install` — скачивает и устанавливает бинарник.
 2. `enable` — создаёт systemd-сервис и включает автозапуск.
 
-После этого будет доступна команда `tgm`.
-
 ## Управление прокси
 
-Все команды нужно выполнять с `sudo` (кроме `status`):
+Все команды нужно выполнять с `sudo`:
 
-| Команда | Описание |
+| Команда ↕▾ | Описание ↕▾ |
 |---|---|
-| `sudo tgm install` | Скачать и установить последнюю версию бинарника |
-| `sudo tgm update` | Обновить бинарник до последней версии |
-| `sudo tgm start` | Запустить прокси-сервис |
-| `sudo tgm stop` | Остановить прокси-сервис |
-| `sudo tgm restart` | Перезапустить прокси-сервис |
-| `tgm status` | Показать статус и логи сервиса |
-| `sudo tgm enable` | Включить автозапуск при загрузке системы |
-| `sudo tgm disable` | Отключить автозапуск |
-| `sudo tgm remove` | **Полностью удалить** прокси и все его файлы |
+| −`sudo ./tg-ws-proxy-armbian.sh install` | Скачать и установить последнюю версию бинарника |
+| `sudo ./tg-ws-proxy-armbian.sh update` | Обновить бинарник до последней версии |
+| `sudo ./tg-ws-proxy-armbian.sh start` | Запустить прокси-сервис |
+| `sudo ./tg-ws-proxy-armbian.sh stop` | Остановить прокси-сервис |
+| `sudo ./tg-ws-proxy-armbian.sh restart` | Перезапустить прокси-сервис |
+| `sudo ./tg-ws-proxy-armbian.sh status` | Показать статус и логи сервиса |
+| `sudo ./tg-ws-proxy-armbian.sh enable` | Включить автозапуск при загрузке системы |
+| `sudo ./tg-ws-proxy-armbian.sh disable` | Отключить автозапуск |
+| `sudo ./tg-ws-proxy-armbian.sh remove` | **Полностью удалить** прокси и все его файлы |
+⚙
+
+**Альтернатива:** после установки можно управлять прокси напрямую через systemd:
+
+```
+sudo systemctl start tg-ws-proxy
+sudo systemctl stop tg-ws-proxy
+sudo systemctl restart tg-ws-proxy
+sudo systemctl status tg-ws-proxy
+sudo journalctl -u tg-ws-proxy -f  # просмотр логов
+```
 
 ### Пример полной настройки
 
@@ -82,7 +90,7 @@ ExecStart=/usr/local/bin/tg-ws-proxy --mode mtproto --secret ВАШ_32_СИМВ�
 
 ```
 sudo systemctl daemon-reload
-sudo tgm restart
+sudo ./tg-ws-proxy-armbian.sh restart
 ```
 
 ### SOCKS5
@@ -152,7 +160,7 @@ wget https://raw.githubusercontent.com/san4jkee/tg-ws-proxy-go-systemd/main/tg-w
 
 ```
 sudo systemctl daemon-reload
-sudo tgm restart
+sudo ./tg-ws-proxy-armbian.sh restart
 ```
 
 ### 5. После `install` сервис не создался
@@ -163,26 +171,12 @@ sudo tgm restart
 sudo ./tg-ws-proxy-armbian.sh enable
 ```
 
-### 6. Команда `tgm` не найдена
-
-Либо перезагрузитесь, либо создайте симлинк вручную:
-
-```
-sudo ln -sf /usr/local/bin/tg-ws-proxy /usr/local/bin/tgm
-```
-
 ## Удаление
 
 Полное удаление прокси:
 
 ```
 sudo ./tg-ws-proxy-armbian.sh remove
-```
-
-Или через команду `tgm`:
-
-```
-sudo tgm remove
 ```
 
 ## Лицензия
