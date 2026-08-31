@@ -37,15 +37,12 @@ check_root() {
 
 get_arch() {
     local arch=$(uname -m)
-    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
-    
-    # Для Linux и macOS бинарники имеют разные префиксы
     case "$arch" in
-        x86_64)   echo "${os}-amd64" ;;
-        aarch64)  echo "${os}-arm64" ;;
-        armv7l)   echo "${os}-armv7" ;;
-        armv6l)   echo "${os}-armv6" ;;
-        i386|i686) echo "${os}-386" ;;
+        aarch64)  echo "openwrt-aarch64" ;;
+        armv7l)   echo "openwrt-armv7" ;;
+        x86_64)   echo "openwrt-x86_64" ;;
+        mipsel*|mips64el*) echo "openwrt-mipsel_24kc" ;;
+        mips*|mips64*) echo "openwrt-mips_24kc" ;;
         *)        echo "unknown" ;;
     esac
 }
