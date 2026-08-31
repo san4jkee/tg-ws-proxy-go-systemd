@@ -11,6 +11,7 @@
 *   **Автозапуск**: Встроенная поддержка systemd.
 *   **Поддержка архитектур**: Автоматически определяет arm64, armv7, amd64 и другие.
 *   **Поддержка Cloudflare**: Возможность использовать свой домен для обхода блокировок.
+*   **Интерактивная настройка**: Скрипт сам спросит порт, секрет, IP и настройки Cloudflare.
 
 ## Быстрая установка
 
@@ -20,29 +21,36 @@
 wget -O tg-ws-proxy-armbian.sh https://raw.githubusercontent.com/san4jkee/tg-ws-proxy-go-systemd/main/tg-ws-proxy-armbian.sh
 chmod +x tg-ws-proxy-armbian.sh
 sudo ./tg-ws-proxy-armbian.sh install
-sudo ./tg-ws-proxy-armbian.sh enable
 ```
 
-**Важно:** Команды `install` и `enable` нужно выполнять **по отдельности**:
+Скрипт задаст несколько вопросов:
 
-1. `install` — скачивает и устанавливает бинарник.
-2. `enable` — создаёт systemd-сервис и включает автозапуск.
+1. **Режим работы** — MTProto (рекомендуется для Telegram) или SOCKS5.
+2. **Порт** — по умолчанию 1443 для MTProto или 1080 для SOCKS5.
+3. **Секрет** — для MTProto можно сгенерировать случайный или ввести свой (32 hex-символа).
+4. **Публичный IP** — если прокси будет доступен из интернета.
+5. **Cloudflare** — если у вас есть домен, подключенный к Cloudflare.
+6. **Автозапуск** — включить при загрузке системы.
+
+После установки будет доступен systemd-сервис `tg-ws-proxy.service`.
 
 ## Управление прокси
 
 Все команды нужно выполнять с `sudo`:
 
-| Команда | Описание |
+| Команда ↕▾ | Описание ↕▾ |
 |---|---|
-| `sudo ./tg-ws-proxy-armbian.sh install` | Скачать и установить последнюю версию бинарника |
-| `sudo ./tg-ws-proxy-armbian.sh update` | Обновить бинарник до последней версии |
-| `sudo ./tg-ws-proxy-armbian.sh start` | Запустить прокси-сервис |
-| `sudo ./tg-ws-proxy-armbian.sh stop` | Остановить прокси-сервис |
-| `sudo ./tg-ws-proxy-armbian.sh restart` | Перезапустить прокси-сервис |
-| `sudo ./tg-ws-proxy-armbian.sh status` | Показать статус и логи сервиса |
-| `sudo ./tg-ws-proxy-armbian.sh enable` | Включить автозапуск при загрузке системы |
+| −`sudo ./tg-ws-proxy-armbian.sh install` | Интерактивная установка с настройкой |
+| `sudo ./tg-ws-proxy-armbian.sh update` | Обновить бинарник (с повторной настройкой) |
+| `sudo ./tg-ws-proxy-armbian.sh reconfigure` | Изменить настройки без переустановки |
+| `sudo ./tg-ws-proxy-armbian.sh start` | Запустить сервис |
+| `sudo ./tg-ws-proxy-armbian.sh stop` | Остановить сервис |
+| `sudo ./tg-ws-proxy-armbian.sh restart` | Перезапустить сервис |
+| `sudo ./tg-ws-proxy-armbian.sh status` | Показать статус и логи |
+| `sudo ./tg-ws-proxy-armbian.sh enable` | Включить автозапуск (создать сервис) |
 | `sudo ./tg-ws-proxy-armbian.sh disable` | Отключить автозапуск |
-| `sudo ./tg-ws-proxy-armbian.sh remove` | **Полностью удалить** прокси и все его файлы |
+| `sudo ./tg-ws-proxy-armbian.sh remove` | **Полностью удалить** прокси и все файлы |
+⚙
 
 **Альтернатива:** после установки можно управлять прокси напрямую через systemd:
 
@@ -54,43 +62,43 @@ sudo systemctl status tg-ws-proxy
 sudo journalctl -u tg-ws-proxy -f  # просмотр логов
 ```
 
-### Пример полной настройки
+### Пример полной установки
 
 ```
-# 1. Установка бинарника
+# 1. Скачиваем скрипт
+wget -O tg-ws-proxy-armbian.sh https://raw.githubusercontent.com/san4jkee/tg-ws-proxy-go-systemd/main/tg-ws-proxy-armbian.sh
+chmod +x tg-ws-proxy-armbian.sh
+
+# 2. Установка с интерактивной настройкой
 sudo ./tg-ws-proxy-armbian.sh install
 
-# 2. Создание сервиса и автозапуск
-sudo ./tg-ws-proxy-armbian.sh enable
-
-# 3. Проверка статуса
+# 3. Готово! Проверяем статус
 sudo ./tg-ws-proxy-armbian.sh status
-
-# 4. Если нужно остановить
-sudo ./tg-ws-proxy-armbian.sh stop
 ```
 
-## Настройка
+## Настройка вручную
 
-По умолчанию прокси запускается в режиме **MTProto** на порту **1443** и слушает все интерфейсы (`0.0.0.0`).
-
-**Чтобы изменить настройки** (порт, режим, включить Cloudflare), отредактируйте файл сервиса:
+Настройки сохраняются в файл `/etc/tg-ws-proxy/config.env`. Вы можете отредактировать его вручную и перезапустить сервис:
 
 ```
-sudo nano /etc/systemd/system/tg-ws-proxy.service
+sudo nano /etc/tg-ws-proxy/config.env
+sudo systemctl restart tg-ws-proxy
 ```
 
-Найдите строку `ExecStart` и измените аргументы. Например, для запуска с Cloudflare:
+Или использовать команду `reconfigure`:
 
 ```
-ExecStart=/usr/local/bin/tg-ws-proxy --mode mtproto --secret ВАШ_32_СИМВОЛЬНЫЙ_HEX --host 0.0.0.0 --port 1443 --link-ip ВАШ_ПУБЛИЧНЫЙ_IP --cf-proxy --cf-domain ВАШ_ДОМЕН --cf-proxy-first --cf-balance
+sudo ./tg-ws-proxy-armbian.sh reconfigure
 ```
 
-После изменения настроек выполните:
+### Пример файла конфигурации
 
 ```
-sudo systemctl daemon-reload
-sudo ./tg-ws-proxy-armbian.sh restart
+PROXY_MODE="mtproto"
+PORT="1443"
+SECRET="ddce44acf471924b64af18cb422e6feb87"
+LINK_IP="95.105.72.80"
+CF_PROXY="--cf-proxy --cf-proxy-first --cf-balance --cf-domain tochkachat.ru"
 ```
 
 ### Режимы работы
@@ -105,11 +113,7 @@ sudo ./tg-ws-proxy-armbian.sh restart
 | Хост | IP-адрес вашего Orange Pi в локальной сети |
 | Порт | `1080` |
 
-Чтобы включить SOCKS5, измените в файле сервиса:
-
-```
-ExecStart=/usr/local/bin/tg-ws-proxy --mode socks5 --host 0.0.0.0 --port 1080
-```
+Чтобы включить SOCKS5, выполните `reconfigure` и выберите режим 2.
 
 #### MTProto (рекомендуемый)
 
@@ -124,8 +128,6 @@ sudo journalctl -u tg-ws-proxy -f
 ```
 tg://proxy?server=ВАШ_IP&port=1443&secret=ВАШ_СЕКРЕТ
 ```
-
-Секрет генерируется автоматически при первом запуске или задаётся через `--secret`.
 
 ### Cloudflare-прокси
 
@@ -158,30 +160,22 @@ Cloudflare имеет лимиты на одновременное количе�
 
 **Важно:** Для каждой записи **включите оранжевое облачко (Proxy status)** — это заставит Cloudflare проксировать трафик.
 
+**Примечание:** Если на основном домене у вас работает сайт (например, GitHub Pages), отключите прокси (серое облачко) для основного домена, оставив оранжевое только для поддоменов `kws1`, `kws2` и т.д.
+
 #### 4. Добавьте домен в исключения (опционально)
 
 Если вы используете ПО для обхода блокировок (например, zapret), добавьте ваш домен в исключения, так как подсеть Cloudflare может быть заблокирована в некоторых странах.
 
 #### 5. Настройте прокси
 
-Отредактируйте файл сервиса и добавьте параметры Cloudflare:
+Запустите `reconfigure` и при вопросе о Cloudflare ответьте **y**, затем введите ваш домен.
 
-```
-ExecStart=/usr/local/bin/tg-ws-proxy --mode mtproto --secret ВАШ_СЕКРЕТ --host 0.0.0.0 --port 1443 --link-ip ВАШ_IP --cf-proxy --cf-domain ВАШ_ДОМЕН --cf-proxy-first --cf-balance
-```
-
-Где:
-
-- `--cf-proxy` — **обязательно** включает Cloudflare-маршрутизацию.
-- `--cf-domain` — ваш домен, подключённый к Cloudflare.
-- `--cf-proxy-first` — сначала пробовать Cloudflare, потом прямой маршрут (рекомендуется).
-- `--cf-balance` — балансировать трафик между несколькими поддоменами (рекомендуется).
+Или отредактируйте файл `/etc/tg-ws-proxy/config.env` вручную.
 
 #### 6. Перезапустите прокси
 
 ```
-sudo systemctl daemon-reload
-sudo ./tg-ws-proxy-armbian.sh restart
+sudo systemctl restart tg-ws-proxy
 ```
 
 В логах должно появиться:
@@ -189,10 +183,6 @@ sudo ./tg-ws-proxy-armbian.sh restart
 ```
 cf_proxy=true cf_domain_list=ваш_домен
 ```
-
-#### 7. Проверка работы
-
-Если Cloudflare настроен правильно, ошибки `i/o timeout` должны исчезнуть, а медиа в Telegram начнут загружаться.
 
 ## Решение проблем
 
@@ -223,46 +213,35 @@ sudo ss -tulpn | grep 1443
 wget https://raw.githubusercontent.com/san4jkee/tg-ws-proxy-go-systemd/main/tg-ws-proxy-armbian.sh
 ```
 
-### 4. Хочу использовать другие параметры запуска
+### 4. Cloudflare не включается (`cf_proxy=false`)
 
-Отредактируйте файл сервиса, как описано в разделе "Настройка", затем перезапустите:
+Убедитесь, что в файле `/etc/tg-ws-proxy/config.env` есть параметры `CF_PROXY` с правильными флагами.
 
-```
-sudo systemctl daemon-reload
-sudo ./tg-ws-proxy-armbian.sh restart
-```
-
-### 5. После `install` сервис не создался
-
-Это нормально. Выполните:
-
-```
-sudo ./tg-ws-proxy-armbian.sh enable
-```
-
-### 6. Cloudflare не включается (`cf_proxy=false`)
-
-Убедитесь, что в файле сервиса есть **оба** параметра:
-
-- `--cf-proxy` (включает Cloudflare)
-- `--cf-domain ваш_домен` (указывает домен)
-
-### 7. Ошибки `i/o timeout` при использовании Cloudflare
+### 5. Ошибки `i/o timeout` при использовании Cloudflare
 
 Проверьте:
 
 - Домен правильно настроен в Cloudflare.
 - Для DNS-записей включено оранжевое облачко.
 - В Cloudflare выбран режим SSL/TLS **"Flexible"**.
-- Попробуйте добавить `--cf-proxy-first` и `--cf-balance`.
 - Если используете zapret или аналоги, добавьте домен в исключения.
 
-### 8. Медиа не грузятся в Telegram
+### 6. Медиа не грузятся в Telegram
 
 - Включите Cloudflare-маршрутизацию (см. раздел выше).
 - Проверьте, что в логах нет ошибок `i/o timeout`.
 - Попробуйте переключиться на SOCKS5-режим.
 - Если проблема сохраняется, проверьте, что в настройках прокси указан только `4:149.154.167.220` (это может помочь с загрузкой медиа).
+
+### 7. Хочу изменить настройки после установки
+
+Используйте команду:
+
+```
+sudo ./tg-ws-proxy-armbian.sh reconfigure
+```
+
+Или отредактируйте файл `/etc/tg-ws-proxy/config.env` вручную.
 
 ## Удаление
 
@@ -280,3 +259,4 @@ MIT License. См. файл LICENSE.
 
 Оригинальный проект: [d0mhate/-tg-ws-proxy-Manager-go](https://github.com/d0mhate/-tg-ws-proxy-Manager-go)
 Инструкция по Cloudflare: [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy/blob/main/docs/CfProxy.md)
+
