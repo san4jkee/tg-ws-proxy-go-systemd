@@ -17,7 +17,7 @@
 Подключитесь к вашему Orange Pi по SSH и выполните:
 
 ```bash
-wget -O tg-ws-proxy-armbian.sh https://your-raw-url/tg-ws-proxy-armbian.sh
+wget -O tg-ws-proxy-armbian.sh https://github.com/san4jkee/tg-ws-proxy-go-systemd/blob/main/tg-ws-proxy-armbian.sh
 chmod +x tg-ws-proxy-armbian.sh
 sudo ./tg-ws-proxy-armbian.sh install
 ```
