@@ -37,13 +37,16 @@ check_root() {
 
 get_arch() {
     local arch=$(uname -m)
+    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    
+    # Для Linux и macOS бинарники имеют разные префиксы
     case "$arch" in
-        x86_64)   echo "amd64" ;;
-        aarch64)  echo "arm64" ;;
-        armv7l)   echo "armv7" ;;
-        armv6l)   echo "armv6" ;;
-        i386|i686) echo "386" ;;
-        *)        error "Неподдерживаемая архитектура: $arch. Поддерживаются: amd64, arm64, armv7, armv6, 386" ;;
+        x86_64)   echo "${os}-amd64" ;;
+        aarch64)  echo "${os}-arm64" ;;
+        armv7l)   echo "${os}-armv7" ;;
+        armv6l)   echo "${os}-armv6" ;;
+        i386|i686) echo "${os}-386" ;;
+        *)        echo "unknown" ;;
     esac
 }
 
