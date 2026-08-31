@@ -20,9 +20,15 @@
 wget -O tg-ws-proxy-armbian.sh https://raw.githubusercontent.com/san4jkee/tg-ws-proxy-go-systemd/main/tg-ws-proxy-armbian.sh
 chmod +x tg-ws-proxy-armbian.sh
 sudo ./tg-ws-proxy-armbian.sh install
+sudo ./tg-ws-proxy-armbian.sh enable
 ```
 
-После установки будет доступна команда `tgm`.
+**Важно:** Команды `install` и `enable` нужно выполнять **по отдельности**:
+
+1. `install` — скачивает и устанавливает бинарник.
+2. `enable` — создаёт systemd-сервис и включает автозапуск.
+
+После этого будет доступна команда `tgm`.
 
 ## Управление прокси
 
@@ -39,6 +45,22 @@ sudo ./tg-ws-proxy-armbian.sh install
 | `sudo tgm enable` | Включить автозапуск при загрузке системы |
 | `sudo tgm disable` | Отключить автозапуск |
 | `sudo tgm remove` | **Полностью удалить** прокси и все его файлы |
+
+### Пример полной настройки
+
+```
+# 1. Установка бинарника
+sudo ./tg-ws-proxy-armbian.sh install
+
+# 2. Создание сервиса и автозапуск
+sudo ./tg-ws-proxy-armbian.sh enable
+
+# 3. Проверка статуса
+sudo ./tg-ws-proxy-armbian.sh status
+
+# 4. Если нужно остановить
+sudo ./tg-ws-proxy-armbian.sh stop
+```
 
 ## Настройка
 
@@ -67,9 +89,11 @@ sudo tgm restart
 
 В настройках Telegram (или другого клиента) укажите:
 
-- Тип: `SOCKS5`
-- Хост: IP-адрес вашего Orange Pi в локальной сети
-- Порт: `1080`
+| Параметр | Значение |
+|---|---|
+| Тип | `SOCKS5` |
+| Хост | IP-адрес вашего Orange Pi в локальной сети |
+| Порт | `1080` |
 
 ### MTProto
 
@@ -80,21 +104,91 @@ sudo journalctl -u tg-ws-proxy -f
 ```
 
 Или сгенерируйте ссылку вручную:
-`tg://proxy?server=ВАШ_IP&port=1080&secret=ВАШ_СЕКРЕТ`
+
+```
+tg://proxy?server=ВАШ_IP&port=1080&secret=ВАШ_СЕКРЕТ
+```
+
+### Cloudflare-прокси
+
+Включите Cloudflare-маршрутизацию, добавив параметры в `ExecStart`:
+
+```
+ExecStart=/usr/local/bin/tg-ws-proxy --mode socks5 --host 0.0.0.0 --port 1080 --cf-proxy --cf-domain ваш_домен.com
+```
 
 ## Решение проблем
 
-**1. Прокси не запускается:**
+### 1. Прокси не запускается
 
-- Проверьте логи: `sudo journalctl -u tg-ws-proxy -xe`
-- Убедитесь, что порт 1080 свободен: `sudo ss -tulpn | grep 1080`
+Проверьте логи:
 
-**2. Не удаётся скачать бинарник:**
+```
+sudo journalctl -u tg-ws-proxy -xe
+```
+
+Убедитесь, что порт 1080 свободен:
+
+```
+sudo ss -tulpn | grep 1080
+```
+
+### 2. Не удаётся скачать бинарник
 
 - Проверьте интернет-соединение на Orange Pi.
 - Возможно, устарел URL. Проверьте последние релизы на [GitHub](https://github.com/d0mhate/-tg-ws-proxy-Manager-go/releases).
 
-**3. Хочу использовать другие параметры запуска:**
+### 3. Ошибка `./tg-ws-proxy-armbian.sh: строка 8: синтаксическая ошибка`
 
-- Отредактируйте файл сервиса, как описано в разделе "Настройка".
+Вы скачали HTML-страницу вместо скрипта. Убедитесь, что используете **сырую** (raw) ссылку:
 
+```
+wget https://raw.githubusercontent.com/san4jkee/tg-ws-proxy-go-systemd/main/tg-ws-proxy-armbian.sh
+```
+
+### 4. Хочу использовать другие параметры запуска
+
+Отредактируйте файл сервиса, как описано в разделе "Настройка", затем перезапустите:
+
+```
+sudo systemctl daemon-reload
+sudo tgm restart
+```
+
+### 5. После `install` сервис не создался
+
+Это нормально. Выполните:
+
+```
+sudo ./tg-ws-proxy-armbian.sh enable
+```
+
+### 6. Команда `tgm` не найдена
+
+Либо перезагрузитесь, либо создайте симлинк вручную:
+
+```
+sudo ln -sf /usr/local/bin/tg-ws-proxy /usr/local/bin/tgm
+```
+
+## Удаление
+
+Полное удаление прокси:
+
+```
+sudo ./tg-ws-proxy-armbian.sh remove
+```
+
+Или через команду `tgm`:
+
+```
+sudo tgm remove
+```
+
+## Лицензия
+
+MIT License. См. файл LICENSE.
+
+## Благодарности
+
+Оригинальный проект: [d0mhate/-tg-ws-proxy-Manager-go](https://github.com/d0mhate/-tg-ws-proxy-Manager-go)
