@@ -385,6 +385,37 @@ EOF
 }
 
 # --- Вывод ссылки подключения ---
+# QR_MODE=auto (по умолчанию: только в терминале), on, off
+qr_enabled() {
+    case "${QR_MODE:-auto}" in
+        on|1|always) return 0 ;;
+        off|0|never) return 1 ;;
+        *) [[ -t 1 ]] ;;
+    esac
+}
+
+print_qr() {
+    local data="$1"
+    qr_enabled || return 0
+
+    if [[ -x "${BIN_PATH}" ]]; then
+        echo -e "\n${BLUE}QR-код (сканируйте камерой Telegram):${NC}"
+        if "${BIN_PATH}" qr "$data" 2>/dev/null; then
+            return 0
+        fi
+        warn "Бинарник не смог отобразить QR-код."
+    fi
+    if have qrencode; then
+        echo -e "\n${BLUE}QR-код (сканируйте камерой Telegram):${NC}"
+        if qrencode -t ANSIUTF8 "$data" 2>/dev/null || qrencode -t UTF8 "$data" 2>/dev/null; then
+            return 0
+        fi
+        warn "Не удалось отобразить QR-код через qrencode."
+    fi
+    info "QR-код пропущен: установите пакет 'qrencode' или повторите установку бинарника."
+    return 0
+}
+
 print_proxy_link() {
     if ! load_config; then
         warn "Конфигурация не найдена. Сначала выполните: sudo $0 install"
@@ -424,9 +455,16 @@ print_proxy_link() {
         if [[ -n "$jlink" && "$jlink" != "$link" ]]; then
             echo "  Ссылка из логов сервиса: ${jlink}"
         fi
+        if [[ "$ip" != "<ВАШ_IP>" ]]; then
+            print_qr "$link"
+        fi
     else
-        echo "  tg://socks?server=${ip}&port=${PORT}"
+        local link="tg://socks?server=${ip}&port=${PORT}"
+        echo "  ${link}"
         echo "  В Telegram: тип SOCKS5, сервер ${ip}, порт ${PORT}"
+        if [[ "$ip" != "<ВАШ_IP>" ]]; then
+            print_qr "$link"
+        fi
     fi
 }
 
@@ -672,8 +710,8 @@ show_help() {
   start            - Запустить сервис
   stop             - Остановить сервис
   restart          - Перезапустить сервис
-  status           - Показать статус, логи и ссылку подключения
-  link             - Показать ссылку подключения (tg://proxy)
+  status           - Показать статус, логи, ссылку и QR-код
+  link             - Показать ссылку подключения (tg://proxy) и QR-код
   enable           - Включить автозапуск (создать сервис)
   disable          - Отключить автозапуск
   remove           - Полностью удалить

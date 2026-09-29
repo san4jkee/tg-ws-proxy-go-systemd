@@ -38,6 +38,23 @@ sudo ./tg-ws-proxy-armbian.sh install
 tg://proxy?server=1.2.3.4&port=1443&secret=dd...
 ```
 
+и **QR-код** для быстрого добавления прокси камерой Telegram:
+
+```
+QR-код (сканируйте камерой Telegram):
+  █▀▀▀▀▀█  ▀▄▄█▀▄▄█ ▄███ █▀▀██  █▀▀▀▀▀█
+  ...
+```
+
+QR печатается только в интерактивном терминале. Управление:
+
+```bash
+sudo QR_MODE=off ./tg-ws-proxy-armbian.sh link   # скрыть QR
+sudo QR_MODE=on  ./tg-ws-proxy-armbian.sh link   # показать QR даже при выводе в файл
+```
+
+Если QR не отображается, установите `qrencode` (`sudo apt install qrencode`) — используется как запасной вариант.
+
 ## Управление прокси
 
 Все команды нужно выполнять с `sudo`:
@@ -51,7 +68,7 @@ tg://proxy?server=1.2.3.4&port=1443&secret=dd...
 | `sudo ./tg-ws-proxy-armbian.sh stop` | Остановить сервис |
 | `sudo ./tg-ws-proxy-armbian.sh restart` | Перезапустить сервис |
 | `sudo ./tg-ws-proxy-armbian.sh status` | Показать статус, логи и ссылку подключения |
-| `sudo ./tg-ws-proxy-armbian.sh link` | Показать ссылку подключения (tg://proxy) |
+| `sudo ./tg-ws-proxy-armbian.sh link` | Показать ссылку подключения (tg://proxy) и QR-код |
 | `sudo ./tg-ws-proxy-armbian.sh enable` | Включить автозапуск (создать сервис) |
 | `sudo ./tg-ws-proxy-armbian.sh disable` | Отключить автозапуск |
 | `sudo ./tg-ws-proxy-armbian.sh remove` | **Полностью удалить** прокси и все файлы |
@@ -122,7 +139,7 @@ CF_PROXY="--cf-proxy --cf-proxy-first --cf-balance --cf-domain tochkachat.ru"
 
 #### MTProto (рекомендуемый)
 
-Ссылка для подключения печатается в конце установки, а в любой момент её можно получить так:
+Ссылка для подключения (и QR-код) печатается в конце установки, а в любой момент её можно получить так:
 
 ```
 sudo ./tg-ws-proxy-armbian.sh link
