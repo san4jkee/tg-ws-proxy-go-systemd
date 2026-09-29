@@ -28,7 +28,8 @@ info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
 ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
-ask()   { read -p "$(echo -e "${BLUE}[?]${NC} $1")" "$2"; }
+ask()   { read -r -p "$(echo -e "${BLUE}[?]${NC} $1")" "$2"; }
+have()  { command -v "$1" >/dev/null 2>&1; }
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -36,16 +37,199 @@ check_root() {
     fi
 }
 
-get_arch() {
-    local arch=$(uname -m)
-    case "$arch" in
-        aarch64)  echo "openwrt-aarch64" ;;
-        armv7l)   echo "openwrt-armv7" ;;
-        x86_64)   echo "openwrt-x86_64" ;;
-        mipsel*|mips64el*) echo "openwrt-mipsel_24kc" ;;
-        mips*|mips64*) echo "openwrt-mips_24kc" ;;
-        *)        echo "unknown" ;;
+check_systemd() {
+    have systemctl || error "systemd не найден. Этот скрипт рассчитан на Ubuntu/Debian/Armbian со systemd."
+}
+
+# --- Сетевые помощники (curl или wget) ---
+fetch() {
+    local url="$1"
+    if have curl; then
+        curl -fsSL "$url"
+    elif have wget; then
+        wget -qO- "$url"
+    else
+        error "Не найдены ни curl, ни wget. Установите их и повторите установку."
+    fi
+}
+
+fetch_head_ok() {
+    local url="$1"
+    if have curl; then
+        curl -fsSIL -o /dev/null "$url" 2>/dev/null
+    elif have wget; then
+        wget --spider -q "$url" 2>/dev/null
+    else
+        error "Не найдены ни curl, ни wget. Установите их и повторите установку."
+    fi
+}
+
+download_to() {
+    local url="$1" out="$2"
+    if have curl; then
+        curl -fL --retry 3 --connect-timeout 15 --progress-bar -o "$out" "$url"
+    elif have wget; then
+        wget -q --show-progress -O "$out" "$url"
+    else
+        error "Не найдены ни curl, ни wget. Установите их и повторите установку."
+    fi
+}
+
+detect_public_ip() {
+    local ip=""
+    local svc
+    for svc in "https://api.ipify.org" "https://ifconfig.me/ip" "https://icanhazip.com"; do
+        ip=$(fetch "$svc" 2>/dev/null | tr -d '[:space:]' || true)
+        if [[ "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+            echo "$ip"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# --- Проверка ввода ---
+is_ipv4() {
+    local ip="$1" octet
+    [[ "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+    local IFS=.
+    for octet in $ip; do
+        if (( 10#$octet > 255 )); then
+            return 1
+        fi
+    done
+    return 0
+}
+
+is_ipv6() {
+    local ip="$1"
+    [[ "$ip" == *:* ]] && [[ "$ip" =~ ^[0-9a-fA-F:]+$ ]]
+}
+
+is_hostname() {
+    local h="$1"
+    [[ ${#h} -le 253 ]] || return 1
+    [[ "$h" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]
+}
+
+is_valid_link_host() {
+    local v="$1"
+    if [[ -z "$v" ]]; then return 0; fi
+    if is_ipv4 "$v"; then return 0; fi
+    if is_ipv6 "$v"; then return 0; fi
+    if is_hostname "$v"; then return 0; fi
+    return 1
+}
+
+is_valid_port() {
+    [[ "$1" =~ ^[0-9]{1,5}$ ]] || return 1
+    (( 10#$1 >= 1 && 10#$1 <= 65535 ))
+}
+
+# --- Определение бинарника под архитектуру ---
+# В релизах нет linux-amd64/linux-arm64, только openwrt-варианты,
+# поэтому для каждой архитектуры перечисляем кандидатов по порядку.
+candidate_assets() {
+    case "$1" in
+        x86_64|amd64)        echo "linux-amd64 openwrt-x86_64" ;;
+        aarch64|arm64)       echo "linux-arm64 openwrt-aarch64" ;;
+        armv7l|armv7)        echo "linux-armv7 openwrt-armv7 linux-armv6" ;;
+        armv6l|armv6)        echo "linux-armv6 openwrt-armv7" ;;
+        i386|i486|i586|i686) echo "linux-386" ;;
+        riscv64)             echo "linux-riscv64" ;;
+        loongarch64|loong64) echo "linux-loong64" ;;
+        mipsel*|mips64el*)   echo "openwrt-mipsel_24kc" ;;
+        mips*|mips64*)       echo "openwrt-mips_24kc" ;;
+        *)                   echo "" ;;
     esac
+}
+
+# Определяем тег последнего релиза без GitHub API (без rate-limit),
+# при неудаче — через API.
+latest_release_tag() {
+    local tag=""
+    if have curl; then
+        tag=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+            "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest" 2>/dev/null || true)
+        tag="${tag##*/}"
+    elif have wget; then
+        tag=$(wget -q --spider --server-response --max-redirect=0 \
+            "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest" 2>&1 \
+            | grep -i '^ *Location:' | tail -n 1 | sed 's#.*/##' | tr -d '\r' || true)
+    fi
+    if [[ "$tag" =~ ^v?[0-9]+\.[0-9]+ ]]; then
+        echo "$tag"
+        return 0
+    fi
+
+    tag=$(fetch "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" 2>/dev/null \
+        | grep -m1 '"tag_name"' | cut -d '"' -f 4 || true)
+    if [[ -n "$tag" ]]; then
+        echo "$tag"
+        return 0
+    fi
+    return 1
+}
+
+resolve_download_url() {
+    local tag="$1" arch="$2" names="$3"
+    local name url json
+
+    for name in $names; do
+        url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${tag}/tg-ws-proxy-${name}"
+        if fetch_head_ok "$url"; then
+            echo "$url"
+            return 0
+        fi
+    done
+
+    # Запасной путь через GitHub API (может упираться в rate-limit)
+    json=$(fetch "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/tags/${tag}" 2>/dev/null || true)
+    if [[ -n "$json" ]]; then
+        for name in $names; do
+            url=$(echo "$json" | grep "browser_download_url.*tg-ws-proxy-${name}\"" | cut -d '"' -f 4 | head -n 1 || true)
+            if [[ -n "$url" ]]; then
+                echo "$url"
+                return 0
+            fi
+        done
+    fi
+    return 1
+}
+
+verify_downloaded_binary() {
+    local f="$1"
+    if [[ ! -s "$f" ]]; then
+        rm -f "$f"
+        error "Файл не был загружен (пустой). Проверьте интернет-соединение."
+    fi
+    if have od && have head; then
+        local magic
+        magic=$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')
+        if [[ "$magic" != "7f454c46" ]]; then
+            rm -f "$f"
+            error "Скачанный файл не является Linux-бинарником (скорее всего, это страница ошибки)."
+        fi
+    else
+        local size
+        size=$(wc -c < "$f")
+        if (( size < 1000000 )); then
+            rm -f "$f"
+            error "Скачанный файл подозрительно мал (${size} байт)."
+        fi
+    fi
+}
+
+load_config() {
+    [[ -f "${CONFIG_FILE}" ]] || return 1
+    PROXY_MODE=""
+    PORT=""
+    SECRET=""
+    LINK_IP=""
+    CF_PROXY=""
+    # shellcheck disable=SC1090
+    source "${CONFIG_FILE}"
+    return 0
 }
 
 # --- Интерактивная настройка ---
@@ -70,10 +254,18 @@ configure_proxy() {
     if [[ "$PROXY_MODE" == "socks5" ]]; then
         default_port="1080"
     fi
-    ask "Порт [$default_port]: " PORT
-    PORT=${PORT:-$default_port}
+    while true; do
+        ask "Порт [$default_port]: " PORT
+        PORT=${PORT:-$default_port}
+        if is_valid_port "$PORT"; then
+            break
+        fi
+        warn "Порт должен быть числом от 1 до 65535. Попробуйте снова."
+        PORT=""
+    done
 
     # 3. Секрет (только для MTProto)
+    SECRET=""
     if [[ "$PROXY_MODE" == "mtproto" ]]; then
         echo -e "\n${BLUE}Настройка секрета MTProto:${NC}"
         echo "  1) Сгенерировать случайный"
@@ -91,38 +283,95 @@ configure_proxy() {
                 fi
             done
         else
-            SECRET=$(openssl rand -hex 16)
+            if have openssl; then
+                SECRET=$(openssl rand -hex 16)
+            else
+                SECRET=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+            fi
+            if [[ ! "$SECRET" =~ ^[0-9a-f]{32}$ ]]; then
+                error "Не удалось сгенерировать секрет. Установите openssl и повторите установку."
+            fi
             ok "Сгенерирован секрет: $SECRET"
         fi
     fi
 
-    # 4. Публичный IP
-    echo -e "\n${BLUE}Настройка публичного IP:${NC}"
-    echo "  Если прокси будет доступен из интернета, укажите ваш внешний IP."
-    echo "  Если только в локальной сети, оставьте пустым или укажите IP в сети."
-    ask "Публичный IP (или нажмите Enter для пропуска): " LINK_IP
+    # 4. Публичный IP / домен
+    echo -e "\n${BLUE}Настройка публичного адреса:${NC}"
+    echo "  Укажите внешний IP или домен, по которым прокси будет доступен из интернета."
+    echo "  Он попадёт в ссылку подключения tg://proxy?server=..."
+    echo "  Если прокси только в локальной сети — введите '-' (пропустить)."
+    local detected_ip=""
+    detected_ip=$(detect_public_ip || true)
+    if [[ -n "$detected_ip" ]]; then
+        echo "  Обнаружен внешний IP: ${detected_ip} (Enter — принять его)"
+    fi
+    LINK_IP=""
+    while true; do
+        if [[ -n "$detected_ip" ]]; then
+            ask "Публичный IP/домен [$detected_ip]: " LINK_IP
+            if [[ -z "$LINK_IP" ]]; then
+                LINK_IP="$detected_ip"
+            fi
+        else
+            ask "Публичный IP/домен (Enter — пропустить): " LINK_IP
+        fi
+        if [[ "$LINK_IP" == "-" ]]; then
+            LINK_IP=""
+            break
+        fi
+        if is_valid_link_host "$LINK_IP"; then
+            break
+        fi
+        warn "Некорректный адрес. Пример: 1.2.3.4 или proxy.example.com (или '-' чтобы пропустить)."
+        LINK_IP=""
+    done
 
     # 5. Cloudflare
+    CF_PROXY=""
     echo -e "\n${BLUE}Настройка Cloudflare (опционально):${NC}"
     echo "  Cloudflare помогает обходить блокировки и делает прокси стабильнее."
-    ask "У вас есть домен, подключенный к Cloudflare? (y/N): " USE_CF
-    USE_CF=${USE_CF:-N}
-    if [[ "$USE_CF" =~ ^[Yy]$ ]]; then
-        CF_PROXY="--cf-proxy --cf-proxy-first --cf-balance"
-        ask "Введите ваш домен для Cloudflare: " CF_DOMAIN
-        if [[ -n "$CF_DOMAIN" ]]; then
-            CF_PROXY="$CF_PROXY --cf-domain $CF_DOMAIN"
-            ok "Cloudflare будет использован с доменом $CF_DOMAIN"
-        else
-            warn "Домен не указан. Cloudflare не будет включён."
-            CF_PROXY=""
+    local use_cf=""
+    while true; do
+        ask "Cloudflare: y/n, либо сразу введите домен (Enter = n): " use_cf
+        use_cf=${use_cf:-n}
+        if [[ "$use_cf" =~ ^[Yy]$ ]] || [[ "$use_cf" == "д" ]] || [[ "$use_cf" == "Д" ]]; then
+            CF_PROXY="--cf-proxy --cf-proxy-first --cf-balance"
+            break
         fi
-    else
-        CF_PROXY=""
-        info "Cloudflare отключён."
+        if [[ "$use_cf" =~ ^[Nn]$ ]] || [[ "$use_cf" == "н" ]] || [[ "$use_cf" == "Н" ]]; then
+            info "Cloudflare отключён."
+            break
+        fi
+        if is_hostname "$use_cf"; then
+            CF_PROXY="--cf-proxy --cf-proxy-first --cf-balance --cf-domain $use_cf"
+            ok "Cloudflare будет использован с доменом $use_cf"
+            break
+        fi
+        warn "Ответ должен быть y, n или доменом (например tochkachat.ru)."
+    done
+
+    if [[ "$use_cf" =~ ^[Yy]$ ]] || [[ "$use_cf" == "д" ]] || [[ "$use_cf" == "Д" ]]; then
+        local cf_domain=""
+        while true; do
+            ask "Введите ваш домен для Cloudflare (например tochkachat.ru): " cf_domain
+            if [[ -z "$cf_domain" ]]; then
+                warn "Домен не указан. Cloudflare не будет включён."
+                CF_PROXY=""
+                break
+            fi
+            if is_hostname "$cf_domain"; then
+                CF_PROXY="--cf-proxy --cf-proxy-first --cf-balance --cf-domain $cf_domain"
+                ok "Cloudflare будет использован с доменом $cf_domain"
+                break
+            fi
+            warn "Некорректный домен. Пример: tochkachat.ru"
+        done
     fi
 
     # 6. Сохраняем настройки
+    SECRET="${SECRET:-}"
+    LINK_IP="${LINK_IP:-}"
+    CF_PROXY="${CF_PROXY:-}"
     mkdir -p "${STATE_DIR}"
     cat > "${CONFIG_FILE}" <<EOF
 PROXY_MODE="$PROXY_MODE"
@@ -131,62 +380,141 @@ SECRET="$SECRET"
 LINK_IP="$LINK_IP"
 CF_PROXY="$CF_PROXY"
 EOF
+    chmod 600 "${CONFIG_FILE}"
     ok "Настройки сохранены в ${CONFIG_FILE}"
+}
+
+# --- Вывод ссылки подключения ---
+print_proxy_link() {
+    if ! load_config; then
+        warn "Конфигурация не найдена. Сначала выполните: sudo $0 install"
+        return 0
+    fi
+
+    local ip="${LINK_IP:-}"
+    if [[ -z "$ip" ]]; then
+        local detected=""
+        detected=$(detect_public_ip || true)
+        if [[ -n "$detected" ]]; then
+            ip="$detected"
+            warn "Публичный IP не задан при установке. Для ссылки использован обнаруженный IP: ${ip}"
+        else
+            ip="<ВАШ_IP>"
+            warn "Публичный IP не задан и не обнаружен. Замените <ВАШ_IP> на свой адрес: sudo $0 reconfigure"
+        fi
+    fi
+
+    echo -e "\n${BLUE}Ссылка для подключения:${NC}"
+    if [[ "${PROXY_MODE:-}" == "mtproto" ]]; then
+        if [[ -z "${SECRET:-}" ]]; then
+            warn "Секрет не задан. Выполните: sudo $0 reconfigure"
+            return 0
+        fi
+        local secret_link="$SECRET"
+        local lower="${secret_link,,}"
+        case "$lower" in
+            dd*|ee*) ;;
+            *) secret_link="dd${secret_link}" ;;
+        esac
+        local link="tg://proxy?server=${ip}&port=${PORT}&secret=${secret_link}"
+        echo "  ${link}"
+        local jlink=""
+        jlink=$(journalctl -u "${SERVICE_NAME}" -n 200 --no-pager 2>/dev/null \
+            | grep -o 'tg://proxy[^[:space:]]*' | tail -n 1 || true)
+        if [[ -n "$jlink" && "$jlink" != "$link" ]]; then
+            echo "  Ссылка из логов сервиса: ${jlink}"
+        fi
+    else
+        echo "  tg://socks?server=${ip}&port=${PORT}"
+        echo "  В Telegram: тип SOCKS5, сервер ${ip}, порт ${PORT}"
+    fi
 }
 
 # --- Основные функции управления ---
 
 install_binary() {
     check_root
+    check_systemd
     info "Начинаю установку ${BINARY_NAME}..."
 
     # Запрашиваем настройки, если конфиг не существует или принудительно
-    if [[ ! -f "${CONFIG_FILE}" ]] || [[ "$1" == "--reconfigure" ]]; then
+    if [[ ! -f "${CONFIG_FILE}" ]] || [[ "${1:-}" == "--reconfigure" ]]; then
         configure_proxy
     else
         info "Использую существующие настройки из ${CONFIG_FILE}"
-        source "${CONFIG_FILE}"
+        load_config
     fi
 
-    local arch=$(get_arch)
-    local latest_url=$(curl -s "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" | grep "browser_download_url.*${arch}" | cut -d '"' -f 4 | head -n 1)
-
-    if [[ -z "$latest_url" ]]; then
-        error "Не удалось найти бинарник для архитектуры '${arch}'. Проверьте релизы на GitHub."
+    local arch names tag url
+    arch=$(uname -m)
+    names=$(candidate_assets "$arch")
+    if [[ -z "$names" ]]; then
+        error "Архитектура '${arch}' не поддерживается. Доступны: x86_64, aarch64, armv7, armv6, i386, mips/mipsel, riscv64, loong64."
     fi
 
-    info "Скачиваю бинарник для $arch: $latest_url"
-    wget -q --show-progress -O "/tmp/${BINARY_NAME}" "$latest_url" || error "Ошибка загрузки."
+    info "Определяю последнюю версию..."
+    tag=$(latest_release_tag || true)
+    if [[ -z "$tag" ]]; then
+        error "Не удалось определить последнюю версию. Релизы: https://github.com/${REPO_OWNER}/${REPO_NAME}/releases"
+    fi
+
+    url=$(resolve_download_url "$tag" "$arch" "$names" || true)
+    if [[ -z "$url" ]]; then
+        error "Не удалось найти бинарник для '${arch}' в релизе ${tag}. Ручная установка: https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/tag/${tag}"
+    fi
+
+    info "Скачиваю бинарник (${tag}, архитектура ${arch}): $url"
+    download_to "$url" "/tmp/${BINARY_NAME}" || error "Ошибка загрузки."
+    verify_downloaded_binary "/tmp/${BINARY_NAME}"
     chmod +x "/tmp/${BINARY_NAME}"
 
-    mkdir -p "${STATE_DIR}"
+    mkdir -p "${STATE_DIR}" "$(dirname "${BIN_PATH}")"
     mv "/tmp/${BINARY_NAME}" "${BIN_PATH}"
     ok "Бинарник установлен в ${BIN_PATH}"
 
-    # Если включен автозапуск, пересоздаём сервис
-    if systemctl is-enabled "${SERVICE_NAME}" &>/dev/null; then
-        info "Автозапуск уже включён, обновляю сервис..."
-        create_service
-        systemctl restart "${SERVICE_NAME}"
+    # Предлагаем включить автозапуск
+    local enable_now=0
+    if systemctl is-enabled --quiet "${SERVICE_NAME}" 2>/dev/null; then
+        info "Автозапуск уже включён — обновляю сервис..."
+        enable_now=1
+    else
+        echo -e "\n${BLUE}Хотите включить автозапуск при загрузке системы?${NC}"
+        local ENABLE_AUTO="n"
+        ask "(y/N): " ENABLE_AUTO
+        if [[ "$ENABLE_AUTO" =~ ^[Yy]$ ]]; then
+            enable_now=1
+        fi
     fi
 
-    # Предлагаем включить автозапуск
-    echo -e "\n${BLUE}Хотите включить автозапуск при загрузке системы?${NC}"
-    ask "(y/N): " ENABLE_AUTO
-    if [[ "$ENABLE_AUTO" =~ ^[Yy]$ ]]; then
+    if [[ "$enable_now" -eq 1 ]]; then
         create_service
-        systemctl enable "${SERVICE_NAME}"
-        systemctl start "${SERVICE_NAME}"
+        systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
+        if ! systemctl restart "${SERVICE_NAME}" 2>/dev/null; then
+            systemctl start "${SERVICE_NAME}" 2>/dev/null || true
+        fi
+        sleep 1
+        if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
+            warn "Сервис не запустился. Последние логи:"
+            journalctl -u "${SERVICE_NAME}" -n 30 --no-pager 2>/dev/null || true
+            error "Установка не завершена: сервис ${SERVICE_NAME} не работает."
+        fi
         ok "Автозапуск включён и сервис запущен."
     else
-        info "Автозапуск не включён. Для запуска используйте: sudo systemctl start ${SERVICE_NAME}"
+        info "Автозапуск не включён. Запуск вручную: sudo systemctl start ${SERVICE_NAME}"
     fi
 
     show_config
+    print_proxy_link
 }
 
 create_service() {
-    source "${CONFIG_FILE}"
+    load_config || error "Конфигурация не найдена: ${CONFIG_FILE}"
+
+    PROXY_MODE="${PROXY_MODE:-mtproto}"
+    PORT="${PORT:-1443}"
+    SECRET="${SECRET:-}"
+    LINK_IP="${LINK_IP:-}"
+    CF_PROXY="${CF_PROXY:-}"
 
     # Формируем команду запуска
     local cmd="${BIN_PATH} --mode ${PROXY_MODE} --host 0.0.0.0 --port ${PORT}"
@@ -226,9 +554,15 @@ EOF
 
 start_proxy() {
     check_root
+    check_systemd
+    [[ -f "${SERVICE_FILE}" ]] || error "Сервис не создан. Выполните: sudo $0 install"
     if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
         info "Запускаю сервис ${SERVICE_NAME}..."
-        systemctl start "${SERVICE_NAME}"
+        if ! systemctl start "${SERVICE_NAME}" 2>/dev/null; then
+            warn "Не удалось запустить сервис. Последние логи:"
+            journalctl -u "${SERVICE_NAME}" -n 30 --no-pager 2>/dev/null || true
+            error "Запуск ${SERVICE_NAME} не удался."
+        fi
         sleep 2
     else
         warn "Сервис уже запущен."
@@ -238,6 +572,7 @@ start_proxy() {
 
 stop_proxy() {
     check_root
+    check_systemd
     if systemctl is-active --quiet "${SERVICE_NAME}"; then
         info "Останавливаю сервис ${SERVICE_NAME}..."
         systemctl stop "${SERVICE_NAME}"
@@ -248,30 +583,44 @@ stop_proxy() {
 }
 
 status_proxy() {
+    check_systemd
     if systemctl is-active --quiet "${SERVICE_NAME}"; then
         ok "Статус: ${GREEN}ЗАПУЩЕН${NC}"
-        systemctl status "${SERVICE_NAME}" --no-pager -l
+        systemctl status "${SERVICE_NAME}" --no-pager -l || true
         echo -e "\n${BLUE}Последние логи:${NC}"
-        journalctl -u "${SERVICE_NAME}" -n 10 --no-pager
+        journalctl -u "${SERVICE_NAME}" -n 10 --no-pager || true
+        print_proxy_link
     else
         warn "Статус: ${RED}ОСТАНОВЛЕН${NC}"
+        if [[ -f "${CONFIG_FILE}" ]]; then
+            print_proxy_link
+        fi
     fi
 }
 
 enable_autostart() {
     check_root
+    check_systemd
     if [[ ! -f "${CONFIG_FILE}" ]]; then
         warn "Настройки не найдены. Запустите 'install' для конфигурации."
         return
     fi
     create_service
-    systemctl enable "${SERVICE_NAME}"
-    systemctl start "${SERVICE_NAME}"
+    systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
+    systemctl start "${SERVICE_NAME}" 2>/dev/null || true
+    sleep 1
+    if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
+        warn "Сервис не запустился. Последние логи:"
+        journalctl -u "${SERVICE_NAME}" -n 30 --no-pager 2>/dev/null || true
+        error "Не удалось запустить ${SERVICE_NAME}."
+    fi
     ok "Автозапуск включён и сервис запущен."
+    print_proxy_link
 }
 
 disable_autostart() {
     check_root
+    check_systemd
     if [[ -f "${SERVICE_FILE}" ]]; then
         systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
         systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
@@ -285,7 +634,9 @@ disable_autostart() {
 
 remove_proxy() {
     check_root
+    check_systemd
     warn "Вы уверены, что хотите полностью удалить прокси? (y/N)"
+    local confirm=""
     read -r confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         info "Удаление отменено."
@@ -312,7 +663,7 @@ show_help() {
 Управление ${BINARY_NAME} (Go) для Armbian
 
 Использование:
-  $0 {install|update|start|stop|restart|status|enable|disable|remove|reconfigure|help}
+  $0 {install|update|start|stop|restart|status|link|enable|disable|remove|reconfigure|help}
 
 Команды:
   install          - Установить бинарник (с интерактивной настройкой)
@@ -321,7 +672,8 @@ show_help() {
   start            - Запустить сервис
   stop             - Остановить сервис
   restart          - Перезапустить сервис
-  status           - Показать статус и логи
+  status           - Показать статус, логи и ссылку подключения
+  link             - Показать ссылку подключения (tg://proxy)
   enable           - Включить автозапуск (создать сервис)
   disable          - Отключить автозапуск
   remove           - Полностью удалить
@@ -332,6 +684,7 @@ show_help() {
   sudo $0 install   # Интерактивная установка
   sudo $0 enable    # Включить автозапуск
   $0 status         # Проверить статус
+  sudo $0 link      # Получить ссылку для Telegram
 EOF
 }
 
@@ -360,6 +713,9 @@ main() {
         status)
             status_proxy
             ;;
+        link)
+            print_proxy_link
+            ;;
         enable)
             enable_autostart
             ;;
@@ -370,13 +726,22 @@ main() {
             remove_proxy
             ;;
         reconfigure)
+            check_root
+            check_systemd
             configure_proxy
-            if systemctl is-enabled "${SERVICE_NAME}" &>/dev/null; then
+            if systemctl is-enabled --quiet "${SERVICE_NAME}" 2>/dev/null; then
                 create_service
-                systemctl restart "${SERVICE_NAME}"
-                ok "Сервис обновлён с новыми настройками."
+                systemctl restart "${SERVICE_NAME}" 2>/dev/null || true
+                sleep 1
+                if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
+                    warn "Сервис не запустился после переконфигурации. Логи:"
+                    journalctl -u "${SERVICE_NAME}" -n 30 --no-pager 2>/dev/null || true
+                else
+                    ok "Сервис обновлён с новыми настройками."
+                fi
             fi
             show_config
+            print_proxy_link
             ;;
         help|--help|-h)
             show_help

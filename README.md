@@ -23,16 +23,20 @@ chmod +x tg-ws-proxy-armbian.sh
 sudo ./tg-ws-proxy-armbian.sh install
 ```
 
-Скрипт задаст несколько вопросов:
+Скрипт задаст несколько вопросов (весь ввод проверяется: некорректный порт/IP/домен запросятся заново):
 
 1. **Режим работы** — MTProto (рекомендуется для Telegram) или SOCKS5.
 2. **Порт** — по умолчанию 1443 для MTProto или 1080 для SOCKS5.
 3. **Секрет** — для MTProto можно сгенерировать случайный или ввести свой (32 hex-символа).
-4. **Публичный IP** — если прокси будет доступен из интернета.
-5. **Cloudflare** — если у вас есть домен, подключенный к Cloudflare.
+4. **Публичный IP/домен** — внешний адрес прокси; если не вводить, скрипт попробует определить его сам. Для пропуска введите `-`.
+5. **Cloudflare** — `y`, `n` или сразу домен (например `tochkachat.ru`).
 6. **Автозапуск** — включить при загрузке системы.
 
-После установки будет доступен systemd-сервис `tg-ws-proxy.service`.
+После установки будет доступен systemd-сервис `tg-ws-proxy.service`, а в конце установки будет напечатана ссылка подключения вида:
+
+```
+tg://proxy?server=1.2.3.4&port=1443&secret=dd...
+```
 
 ## Управление прокси
 
@@ -46,7 +50,8 @@ sudo ./tg-ws-proxy-armbian.sh install
 | `sudo ./tg-ws-proxy-armbian.sh start` | Запустить сервис |
 | `sudo ./tg-ws-proxy-armbian.sh stop` | Остановить сервис |
 | `sudo ./tg-ws-proxy-armbian.sh restart` | Перезапустить сервис |
-| `sudo ./tg-ws-proxy-armbian.sh status` | Показать статус и логи |
+| `sudo ./tg-ws-proxy-armbian.sh status` | Показать статус, логи и ссылку подключения |
+| `sudo ./tg-ws-proxy-armbian.sh link` | Показать ссылку подключения (tg://proxy) |
 | `sudo ./tg-ws-proxy-armbian.sh enable` | Включить автозапуск (создать сервис) |
 | `sudo ./tg-ws-proxy-armbian.sh disable` | Отключить автозапуск |
 | `sudo ./tg-ws-proxy-armbian.sh remove` | **Полностью удалить** прокси и все файлы |
@@ -117,7 +122,13 @@ CF_PROXY="--cf-proxy --cf-proxy-first --cf-balance --cf-domain tochkachat.ru"
 
 #### MTProto (рекомендуемый)
 
-После запуска прокси вы увидите ссылку для подключения в логах:
+Ссылка для подключения печатается в конце установки, а в любой момент её можно получить так:
+
+```
+sudo ./tg-ws-proxy-armbian.sh link
+```
+
+Она же появляется в логах сервиса (бинарник печатает её только если задан `--link-ip`, то есть публичный IP):
 
 ```
 sudo journalctl -u tg-ws-proxy -f
