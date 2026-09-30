@@ -118,8 +118,8 @@ sudo ./tg-ws-proxy-armbian.sh reconfigure
 ```
 PROXY_MODE="mtproto"
 PORT="1443"
-SECRET="ddce44acf471924b64af18cb422e6feb87"
-LINK_IP="95.105.72.80"
+SECRET="dd00112233445566778899aabbccddeeff"
+LINK_IP="192.0.2.10"
 CF_PROXY="--cf-proxy --cf-proxy-first --cf-balance --cf-domain tochkachat.ru"
 ```
 
