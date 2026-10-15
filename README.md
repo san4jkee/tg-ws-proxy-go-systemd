@@ -29,7 +29,7 @@ sudo ./tg-ws-proxy-armbian.sh install
 2. **Порт** — по умолчанию 1443 для MTProto или 1080 для SOCKS5.
 3. **Секрет** — для MTProto можно сгенерировать случайный или ввести свой (32 hex-символа).
 4. **Публичный IP/домен** — внешний адрес прокси; если не вводить, скрипт попробует определить его сам. Для пропуска введите `-`.
-5. **Cloudflare** — `y`, `n` или сразу домен (например `tochkachat.ru`).
+5. **Cloudflare** — `y`, `n` или сразу домен.
 6. **Автозапуск** — включить при загрузке системы.
 
 После установки будет доступен systemd-сервис `tg-ws-proxy.service`, а в конце установки будет напечатана ссылка подключения вида:
@@ -120,7 +120,7 @@ PROXY_MODE="mtproto"
 PORT="1443"
 SECRET="dd00112233445566778899aabbccddeeff"
 LINK_IP="192.0.2.10"
-CF_PROXY="--cf-proxy --cf-proxy-first --cf-balance --cf-domain tochkachat.ru"
+CF_PROXY="--cf-proxy --cf-proxy-first --cf-balance --cf-domain ВАШ_ДОМЕН"
 ```
 
 ### Режимы работы
